@@ -142,7 +142,7 @@ std::string Game::moveToStr(const Move& m) const {
     return oss.str();
 }
 
-std::optional<Move> Game::strToMove(const std::string& s, Color col) const {
+std::optional<Move> Game::strToMove(const std::string& s, Color /*col*/) const {
     // Accept two formats:
     // 1) "r c r c"  e.g. "3 12 4 12"
     // 2) "a1b2"     algebraic
@@ -330,6 +330,10 @@ static void doAiMove(Board& b, Engine& eng){
     Piece mover = b.at(res.bestMove.sr, res.bestMove.sc);
     Piece cap   = b.at(res.bestMove.tr, res.bestMove.tc);
 
+    if(b.turnIdx == 0) { // Should be true if it's AI turn, but let's be safe
+         // In proto mode, we might want a cleaner bestmove output
+    }
+
     std::cout << Ansi::pieceBg(RED) << " AI " << Ansi::RESET
               << " plays: " << Ansi::BOLD
               << pieceChar(mover.type)
@@ -344,6 +348,14 @@ static void doAiMove(Board& b, Engine& eng){
     }
     if(res.bestMove.castleKingside)  std::cout << " (O-O)";
     if(res.bestMove.castleQueenside) std::cout << " (O-O-O)";
+
+    // Algebraic for GUI parsing
+    std::cout << "  BESTMOVE ";
+    char fc = 'a' + res.bestMove.sc;
+    char tc = 'a' + res.bestMove.tc;
+    std::cout << fc << (res.bestMove.sr+1) << tc << (res.bestMove.tr+1);
+    if(res.bestMove.promotion != NONE) std::cout << (char)std::tolower(pieceChar(res.bestMove.promotion));
+
     std::cout << "  [depth=" << res.depth << " score=" << res.score
               << " nodes=" << res.nodes << "]\n";
 
@@ -367,7 +379,7 @@ static void doAiMove(Board& b, Engine& eng){
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main game loop
 // ─────────────────────────────────────────────────────────────────────────────
-void Game::start(){
+void Game::start(bool proto){
     Zobrist::init();
     std::fill(std::begin(g_tt), std::end(g_tt), TTEntry{});
 
@@ -377,46 +389,59 @@ void Game::start(){
 
     board.reset();
 
-    std::cout << "\n"
-        << Ansi::BOLD << Ansi::CYAN_FG
-        << "╔═══════════════════════════════════════════════╗\n"
-        << "║      4-Player FFA Chess Engine  v1.0          ║\n"
-        << "║   AI plays Red  │  You play Black/Green/Blue  ║\n"
-        << "╚═══════════════════════════════════════════════╝\n"
-        << Ansi::RESET;
-
-    printHelp();
-    printBoard();
-    printScores();
+    if(!proto){
+        std::cout << "\n"
+            << Ansi::BOLD << Ansi::CYAN_FG
+            << "╔═══════════════════════════════════════════════╗\n"
+            << "║      4-Player FFA Chess Engine  v1.0          ║\n"
+            << "║   AI plays Red  │  You play Black/Green/Blue  ║\n"
+            << "╚═══════════════════════════════════════════════╝\n"
+            << Ansi::RESET;
+        printHelp();
+        printBoard();
+        printScores();
+    }
 
     std::string line;
     while(true){
         if(gameOver(board)){
-            Color winner = findWinner(board);
+            if(!proto){
+                Color winner = findWinner(board);
             std::cout << "\n" << Ansi::BOLD << Ansi::YELLOW_FG
                       << "🏆  GAME OVER! Winner: " << colorName(winner)
                       << " with " << board.ps[winner].score << " points!\n"
                       << Ansi::RESET;
             printScores();
+        } else {
+            std::cout << "gameover\n";
+        }
+            break;
+        }
+
+        if(board.isDraw()){
+            if(!proto) std::cout << "\n" << Ansi::BOLD << Ansi::YELLOW_FG << "⚖  DRAW!\n" << Ansi::RESET;
+            else std::cout << "draw\n";
             break;
         }
 
         Color cur = board.currentPlayer();
         if(cur==NO_COLOR) break;
 
-        // ── AI turn
-        if(cur==RED){
+        // ── AI turn (Automatic only in interactive mode)
+        if(!proto && cur==RED){
             doAiMove(board, engine);
             printBoard();
             printScores();
             continue;
         }
 
-        // ── Human turn
-        std::cout << Ansi::playerColor(cur) << Ansi::BOLD
-                  << "\n▶  " << colorName(cur) << "'s turn"
-                  << Ansi::RESET << "  (enter move or 'help'): ";
-        std::cout.flush();
+        // ── Prompt
+        if(!proto){
+            std::cout << Ansi::playerColor(cur) << Ansi::BOLD
+                      << "\n▶  " << colorName(cur) << "'s turn"
+                      << Ansi::RESET << "  (enter move or 'help'): ";
+            std::cout.flush();
+        }
 
         if(!std::getline(std::cin, line)){
             // EOF
@@ -430,8 +455,44 @@ void Game::start(){
 
         // ── Commands
         if(line=="quit"||line=="exit"){
-            std::cout << "Goodbye!\n";
+            if(!proto) std::cout << "Goodbye!\n";
             break;
+        }
+        if(proto && line == "proto") { std::cout << "proto ok\n"; continue; }
+        if(proto && line == "go") { doAiMove(board, engine); continue; }
+        if(proto && line.rfind("perft ", 0) == 0) {
+            int d = std::stoi(line.substr(6));
+            auto start = std::chrono::steady_clock::now();
+            auto res = board.perft(d);
+            auto end = std::chrono::steady_clock::now();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end-start).count();
+            std::cout << "perft depth " << d << " nodes " << res.nodes << " time " << ms << "ms\n";
+            continue;
+        }
+        if(proto && line.rfind("position ", 0) == 0) {
+            // Very simple position parser: position startpos moves h2h4 ...
+            board.reset();
+            size_t movesPos = line.find("moves ");
+            if(movesPos != std::string::npos) {
+                std::string movesStr = line.substr(movesPos + 6);
+                std::istringstream iss(movesStr);
+                std::string mvStr;
+                while(iss >> mvStr) {
+                    auto mv = strToMove(mvStr, board.currentPlayer());
+                    if(mv) {
+                        // find real legal move to get all flags
+                        std::vector<Move> legal;
+                        board.legalMoves(board.currentPlayer(), legal);
+                        for(auto& lm : legal) {
+                            if(lm.sr == mv->sr && lm.sc == mv->sc && lm.tr == mv->tr && lm.tc == mv->tc) {
+                                board.applyMove(lm);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
         }
         if(line=="help")   { printHelp();       continue; }
         if(line=="board")  { printBoard();       continue; }
@@ -473,8 +534,12 @@ void Game::start(){
         }
 
         if(applyHumanMove(board, *mv)){
-            printBoard();
-            printScores();
+            if(!proto) {
+                printBoard();
+                printScores();
+            } else {
+                std::cout << "move ok\n";
+            }
         }
     }
 }

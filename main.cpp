@@ -18,6 +18,11 @@ int main(int argc, char* argv[]){
         }
     }
 
-    game.start();
+    bool proto = false;
+    for(int i=1;i<argc;i++){
+        if(std::string(argv[i])=="--proto") proto = true;
+    }
+
+    game.start(proto);
     return 0;
 }

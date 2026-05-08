@@ -25,6 +25,13 @@ TTEntry g_tt[TT_SIZE];
 // ─────────────────────────────────────────────────────────────────────────────
 //  Board helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Sets a piece at (r,c) and updates the Zobrist hash incrementally.
+ * @param r Row index
+ * @param c Column index
+ * @param p Piece to place
+ */
 void Board::set(int r, int c, Piece p){
     if(!inBounds(r,c)) return;
     Piece old = cells[r][c];
@@ -42,6 +49,9 @@ void Board::reset(){
     for(int i=1;i<=4;i++) ps[i] = PlayerState{};
     turnIdx = 0;
     hash = 0;
+    enPassantSq = {-1, -1};
+    halfmoveClock = 0;
+    history.clear();
     turnOrder[0]=RED; turnOrder[1]=BLACK; turnOrder[2]=GREEN; turnOrder[3]=BLUE;
 
     // Black at top (rows 0-1, cols 3-10), moves DOWN
@@ -113,7 +123,7 @@ static void pawnDelta(Color col, int& dr, int& dc){
     }
 }
 // Pawn capture diagonals (perpendicular to forward)
-static void pawnCapDeltas(Color col, int ds[2][2]){
+void Board::pawnCapDeltas(Color col, int ds[2][2]){
     switch(col){
         case BLACK: ds[0][0]=1; ds[0][1]=-1; ds[1][0]=1; ds[1][1]=1; break;
         case BLUE:  ds[0][0]=-1; ds[0][1]=-1; ds[1][0]=-1; ds[1][1]=1; break;
@@ -169,9 +179,14 @@ void Board::genMovesFor(int r, int c, std::vector<Move>& out) const {
             int ds[2][2]; pawnCapDeltas(col,ds);
             for(int i=0;i<2;i++){
                 int ar=r+ds[i][0], ac=c+ds[i][1];
-                if(inBounds(ar,ac) && isEnemy(cells[ar][ac],col)){
-                    PieceType promo = shouldPromote(ar,ac,col) ? Q : NONE;
-                    tryPush(ar,ac,promo);
+                if(inBounds(ar,ac)){
+                    if(isEnemy(cells[ar][ac],col)){
+                        PieceType promo = shouldPromote(ar,ac,col) ? Q : NONE;
+                        tryPush(ar,ac,promo);
+                    } else if(ar==enPassantSq.r && ac==enPassantSq.c){
+                        Move em; em.sr=r; em.sc=c; em.tr=ar; em.tc=ac; em.isEnPassant=true;
+                        out.push_back(em);
+                    }
                 }
             }
             break;
@@ -261,6 +276,65 @@ void Board::genAllMoves(Color col, std::vector<Move>& out) const {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Check detection
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Efficiently determines if a square is attacked by a specific player.
+ * Avoids full move generation by scanning outwards from the target square.
+ * @param r Target row
+ * @param c Target column
+ * @param attacker Color of the potential attacking player
+ * @return true if the square is attacked
+ */
+bool Board::isAttacked(int r, int c, Color attacker) const {
+    // Knight
+    static const int kn[8][2]={{-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}};
+    for(auto& d:kn){
+        int nr=r+d[0], nc=c+d[1];
+        if(inBounds(nr,nc)){
+            Piece p = cells[nr][nc];
+            if(p.type==N && p.color==attacker) return true;
+        }
+    }
+    // King
+    for(int dr=-1;dr<=1;dr++)
+        for(int dc=-1;dc<=1;dc++)
+            if(dr||dc){
+                int nr=r+dr, nc=c+dc;
+                if(inBounds(nr,nc)){
+                    Piece p = cells[nr][nc];
+                    if(p.type==K && p.color==attacker) return true;
+                }
+            }
+    // Sliding pieces
+    auto slide = [&](int dr, int dc, PieceType t1, PieceType t2){
+        int nr=r+dr, nc=c+dc;
+        while(inBounds(nr,nc)){
+            Piece p = cells[nr][nc];
+            if(!p.empty()){
+                if(p.color==attacker && (p.type==t1 || p.type==t2 || p.type==Q)) return true;
+                break;
+            }
+            nr+=dr; nc+=dc;
+        }
+        return false;
+    };
+    if(slide(1,0, R, R) || slide(-1,0, R, R) || slide(0,1, R, R) || slide(0,-1, R, R)) return true;
+    if(slide(1,1, B, B) || slide(1,-1, B, B) || slide(-1,1, B, B) || slide(-1,-1, B, B)) return true;
+
+    // Pawns: if 'attacker' has a pawn at (pr,pc) that can capture (r,c)
+    int ds[2][2];
+    Board::pawnCapDeltas(attacker, ds);
+    for(int i=0;i<2;i++){
+        int pr = r - ds[i][0];
+        int pc = c - ds[i][1];
+        if(inBounds(pr,pc)){
+            Piece p = cells[pr][pc];
+            if(p.type==P && p.color==attacker) return true;
+        }
+    }
+    return false;
+}
+
 bool Board::isInCheck(Color col) const {
     Sq king = findKing(col);
     if(king.r<0) return true; // no king = in check
@@ -268,10 +342,7 @@ bool Board::isInCheck(Color col) const {
     for(int oc=1;oc<=4;oc++){
         Color opp=(Color)oc;
         if(opp==col || ps[opp].eliminated) continue;
-        std::vector<Move> moves;
-        genAllMoves(opp, moves);
-        for(auto& m:moves)
-            if(m.tr==king.r && m.tc==king.c) return true;
+        if(isAttacked(king.r, king.c, opp)) return true;
     }
     return false;
 }
@@ -324,9 +395,35 @@ void Board::applyMove(const Move& mv){
         if(inBounds(nrr,nrc)) set(nrr,nrc,rook);
     }
 
+    Piece victim = cells[mv.tr][mv.tc];
+
+    // Update halfmove clock: reset on pawn move or capture
+    if(mover.type==P || !victim.empty()) halfmoveClock = 0;
+    else halfmoveClock++;
+
     set(mv.sr, mv.sc, NO_PIECE);
     Piece landing = mv.promotion!=NONE ? Piece{mv.promotion, col} : mover;
     set(mv.tr, mv.tc, landing);
+
+    // Handle En Passant capture
+    if(mv.isEnPassant){
+        int dr, dc;
+        pawnDelta(col, dr, dc);
+        // The captured pawn is one step BEHIND the target square in the perspective of the mover
+        set(mv.tr - dr, mv.tc - dc, NO_PIECE);
+    }
+
+    // Set new En Passant square
+    enPassantSq = {-1, -1};
+    if(mover.type==P && std::abs(mv.tr-mv.sr)+std::abs(mv.tc-mv.sc)==2){
+        // Double push
+        int dr, dc;
+        pawnDelta(col, dr, dc);
+        enPassantSq = {mv.sr + dr, mv.sc + dc};
+    }
+
+    // Record history for repetition
+    history.push_back(hash);
 
     // Advance turn index
     int next=(turnIdx+1)%4;
@@ -376,6 +473,16 @@ bool Board::isCheckmated(Color col){
     return legal.empty();
 }
 
+bool Board::isDraw() const {
+    if(halfmoveClock >= 100) return true; // 50-move rule
+    // 3-fold repetition
+    int count = 0;
+    for(uint64_t h : history){
+        if(h == hash) count++;
+    }
+    return count >= 3;
+}
+
 bool Board::isStalemate(Color col){
     if(isInCheck(col)) return false;
     std::vector<Move> legal;
@@ -399,4 +506,23 @@ int Board::pieceCount(Color col) const {
         for(int c=0;c<COLS;c++)
             if(cells[r][c].color==col && cells[r][c].type!=NONE) n++;
     return n;
+}
+
+PerftResult Board::perft(int depth) {
+    if(depth == 0) return {1, 0, 0, 0, 0};
+
+    PerftResult total;
+    std::vector<Move> moves;
+    legalMoves(currentPlayer(), moves);
+
+    for(auto& m : moves) {
+        Board saved = *this;
+        applyMove(m);
+        PerftResult res = perft(depth - 1);
+        *this = saved;
+
+        total.nodes += res.nodes;
+        // In a true perft we'd track more, but nodes is most important
+    }
+    return total;
 }

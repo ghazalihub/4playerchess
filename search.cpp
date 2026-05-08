@@ -18,7 +18,7 @@ static int mvvLva(PieceType attacker, PieceType victim){
     return PieceVal::val[(int)victim] * 10 - PieceVal::val[(int)attacker];
 }
 
-void Engine::orderMoves(std::vector<Move>& moves, const Board& b, const Move& ttMove){
+void Engine::orderMoves(std::vector<Move>& moves, const Board& b, const Move& ttMove, int ply){
     // Score each move
     auto score=[&](const Move& m) -> int {
         // TT best move first
@@ -34,6 +34,13 @@ void Engine::orderMoves(std::vector<Move>& moves, const Board& b, const Move& tt
         if(m.promotion!=NONE){
             return 40000 + PieceVal::val[(int)m.promotion];
         }
+
+        // Killer moves
+        if(ply < 64){
+            if(m == killerMoves[ply][0]) return 35000;
+            if(m == killerMoves[ply][1]) return 34000;
+        }
+
         // Quiet move: PST delta
         int pstBefore = Board::pst(mover.type, mover.color, m.sr, m.sc);
         int pstAfter  = Board::pst(mover.type, mover.color, m.tr, m.tc);
@@ -69,7 +76,7 @@ int Engine::quiesce(Board& b, int alpha, int beta){
         if(!t.empty() && t.color!=col) caps.push_back(m);
         else if(m.promotion!=NONE) caps.push_back(m);
     }
-    Move dummy{}; orderMoves(caps,b,dummy);
+    Move dummy{}; orderMoves(caps,b,dummy, 0);
 
     for(auto& m:caps){
         if(timesUp()) return alpha;
@@ -89,7 +96,7 @@ int Engine::quiesce(Board& b, int alpha, int beta){
 //  against the AI (paranoid model). This is the strongest known approach for
 //  FFA chess since it's the most conservative against worst-case opponents.
 // ─────────────────────────────────────────────────────────────────────────────
-int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color perspective){
+int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color /*perspective*/, int ply){
     nodes_++;
     if(timesUp()) return Eval::evaluate(b, aiColor);
 
@@ -105,7 +112,7 @@ int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color persp
         while(tmp.ps[tmp.turnOrder[nextIdx]].eliminated && nextIdx!=tmp.turnIdx)
             nextIdx=(nextIdx+1)%4;
         tmp.turnIdx=nextIdx;
-        return paranoidSearch(tmp, depth, alpha, beta, (Color)tmp.turnOrder[nextIdx]);
+        return paranoidSearch(tmp, depth, alpha, beta, (Color)tmp.turnOrder[nextIdx], ply);
     }
 
     // Leaf node
@@ -142,7 +149,7 @@ int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color persp
         return Eval::evaluate(b,aiColor); // stalemate
     }
 
-    orderMoves(moves, b, ttMove);
+    orderMoves(moves, b, ttMove, ply);
 
     bool maximizing = (current == aiColor);
     int bestScore = maximizing ? (-INF) : (INF);
@@ -164,18 +171,33 @@ int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color persp
         }
 
         int score = paranoidSearch(b, depth-1, alpha, beta,
-                                   (Color)b.turnOrder[b.turnIdx]);
+                                   (Color)b.turnOrder[b.turnIdx], ply + 1);
         b = saved;
 
         if(maximizing){
-            if(score>bestScore){ bestScore=score; bestMove=m; }
+            if(score>bestScore){
+                bestScore=score;
+                bestMove=m;
+            }
             if(score>alpha) alpha=score;
         } else {
             // All opponents minimise AI score
-            if(score<bestScore){ bestScore=score; bestMove=m; }
+            if(score<bestScore){
+                bestScore=score;
+                bestMove=m;
+            }
             if(score<beta) beta=score;
         }
-        if(alpha>=beta) break; // cutoff
+        if(alpha>=beta){
+            // Store killer move if quiet
+            if(b.at(m.tr, m.tc).empty() && ply < 64){
+                if(!(m == killerMoves[ply][0])){
+                    killerMoves[ply][1] = killerMoves[ply][0];
+                    killerMoves[ply][0] = m;
+                }
+            }
+            break; // cutoff
+        }
     }
 
     // TT store
@@ -205,9 +227,12 @@ SearchResult Engine::search(Board& b){
     b.legalMoves(aiColor, rootMoves);
     if(rootMoves.empty()) return result;
 
+    // Clear killers for new search
+    memset(killerMoves, 0, sizeof(killerMoves));
+
     // Pre-order root moves
     Move dummy{};
-    orderMoves(rootMoves, b, dummy);
+    orderMoves(rootMoves, b, dummy, 0);
     result.bestMove = rootMoves[0];
 
     for(int depth=1; depth<=maxDepth; depth++){
@@ -232,7 +257,7 @@ SearchResult Engine::search(Board& b){
             }
 
             int score = paranoidSearch(b, depth-1, -INF, INF,
-                                       (Color)b.turnOrder[b.turnIdx]);
+                                       (Color)b.turnOrder[b.turnIdx], 1);
             b = saved;
 
             if(score>bestScore){
