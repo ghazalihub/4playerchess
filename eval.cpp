@@ -1,0 +1,262 @@
+#include "chess4.hpp"
+#include <cmath>
+#include <algorithm>
+
+// Forward declare board.cpp helpers used here
+static void pawnDelta(Color col, int& dr, int& dc){
+    switch(col){
+        case BLACK: dr=1;  dc=0;  break;
+        case BLUE:  dr=-1; dc=0;  break;
+        case GREEN: dr=0;  dc=1;  break;
+        case RED:   dr=0;  dc=-1; break;
+        default:    dr=0;  dc=0;  break;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Piece-Square Tables (oriented toward center for most pieces)
+//  Board is 14×14 with corner cutoffs. Center ~ (6.5,6.5)
+//  Tables are symmetric and mapped per player orientation
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Distance from center (6.5,6.5), higher = worse for most pieces
+static float centerDist(int r, int c){
+    float dr = r - 6.5f, dc = c - 6.5f;
+    return std::sqrt(dr*dr + dc*dc);
+}
+
+// Generic bonus: pieces want to be near center
+static int centerBonus(int r, int c, int scale=5){
+    float d = centerDist(r,c);
+    return (int)(scale * (9.0f - d));
+}
+
+// For a player, "advancement" = how far their pieces have moved into enemy territory
+// Returns 0-13 value (higher = more advanced)
+static int advancement(int r, int c, Color col){
+    switch(col){
+        case BLACK: return r;         // black moves down, higher row = more advanced
+        case BLUE:  return 13-r;      // blue moves up
+        case GREEN: return c;         // green moves right
+        case RED:   return 13-c;      // red moves left
+        default:    return 0;
+    }
+}
+
+// Pawn advancement bonus
+static int pawnAdvBonus(int r, int c, Color col){
+    int adv = advancement(r,c,col);
+    if(adv<2) return -10;
+    if(adv<4) return 0;
+    if(adv<6) return 10;
+    if(adv<8) return 25;
+    return 40; // approaching promotion
+}
+
+// Knight outpost: bonus for being in enemy half
+static int knightBonus(int r, int c, Color col){
+    int adv = advancement(r,c,col);
+    int cb  = centerBonus(r,c,3);
+    return cb + (adv>6 ? 15 : 0);
+}
+
+// Bishop: prefers open diagonals — proxy with center
+static int bishopBonus(int r, int c, Color col){
+    return centerBonus(r,c,4) + (advancement(r,c,col)>5 ? 10 : 0);
+}
+
+// Rook: wants open files/rows (center proximity + rank)
+static int rookBonus(int r, int c, Color col){
+    return centerBonus(r,c,2) + (advancement(r,c,col)>7 ? 20 : 0);
+}
+
+// Queen: highly valuable in center
+static int queenBonus(int r, int c, Color col){
+    return centerBonus(r,c,3);
+}
+
+// King: safety — stay near back rank in midgame
+static int kingMidgameBonus(int r, int c, Color col){
+    int adv = advancement(r,c,col);
+    int penalty = adv * 8; // penalise for being far from back
+    return -penalty;
+}
+
+int Board::pst(PieceType t, Color col, int r, int c){
+    switch(t){
+        case P: return pawnAdvBonus(r,c,col);
+        case N: return knightBonus(r,c,col);
+        case B: return bishopBonus(r,c,col);
+        case R: return rookBonus(r,c,col);
+        case Q: return queenBonus(r,c,col);
+        case K: return kingMidgameBonus(r,c,col);
+        default: return 0;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+namespace Eval {
+
+int mobilityScore(Board& b, Color col){
+    if(b.ps[col].eliminated) return 0;
+    std::vector<Move> moves;
+    b.genAllMoves(col, moves);
+    return (int)moves.size() * 2;
+}
+
+int kingSafety(const Board& b, Color col){
+    if(b.ps[col].eliminated) return 0;
+    Sq king = b.findKing(col);
+    if(king.r<0) return -500;
+
+    int penalty = 0;
+    // Count attackers around king
+    for(int oc=1;oc<=4;oc++){
+        Color opp=(Color)oc;
+        if(opp==col || b.ps[opp].eliminated) continue;
+        std::vector<Move> omoves;
+        b.genAllMoves(opp, omoves);
+        for(auto& m:omoves){
+            int dr=std::abs(m.tr-king.r), dc=std::abs(m.tc-king.c);
+            if(dr<=1 && dc<=1) penalty+=15;     // attack adjacent to king
+            if(m.tr==king.r && m.tc==king.c) penalty+=50; // direct attack
+        }
+    }
+    // Bonus for having pawns near king
+    int shield=0;
+    int dr=0,dc=0; pawnDelta(col,dr,dc);
+    for(int i=-1;i<=1;i++){
+        int pr = king.r - dr + (col==RED||col==GREEN?i:0);
+        int pc = king.c - dc + (col==BLACK||col==BLUE?i:0);
+        if(inBounds(pr,pc)){
+            auto& p=b.cells[pr][pc];
+            if(p.type==P && p.color==col) shield+=10;
+        }
+    }
+    return shield - penalty;
+}
+
+int pawnStructure(const Board& b, Color col){
+    if(b.ps[col].eliminated) return 0;
+    int score=0;
+    // For each pawn, check if it's doubled, isolated, or passed
+    for(int r=0;r<ROWS;r++)
+        for(int c=0;c<COLS;c++){
+            auto& p=b.cells[r][c];
+            if(p.type!=P || p.color!=col) continue;
+
+            // Doubled pawn penalty: another friendly pawn on same file/rank
+            int doubled=0;
+            if(col==BLACK||col==BLUE){
+                for(int r2=0;r2<ROWS;r2++)
+                    if(r2!=r && b.cells[r2][c].type==P && b.cells[r2][c].color==col) doubled++;
+            } else {
+                for(int c2=0;c2<COLS;c2++)
+                    if(c2!=c && b.cells[r][c2].type==P && b.cells[r][c2].color==col) doubled++;
+            }
+            if(doubled>0) score-=20;
+
+            // Passed pawn bonus: no enemy pawns blocking
+            bool passed=true;
+            int advDir=advancement(r,c,col);
+            for(int oc=1;oc<=4;oc++){
+                Color opp=(Color)oc;
+                if(opp==col||b.ps[opp].eliminated) continue;
+                for(int r2=0;r2<ROWS;r2++)
+                    for(int c2=0;c2<COLS;c2++){
+                        auto& op=b.cells[r2][c2];
+                        if(op.type==P && op.color==opp){
+                            int adjAdv=advancement(r2,c2,opp);
+                            // Rough check: enemy pawn ahead on same lane
+                            if(col==BLACK||col==BLUE){
+                                if(std::abs(c2-c)<=1 && advancement(r2,c2,col)>advDir) passed=false;
+                            } else {
+                                if(std::abs(r2-r)<=1 && advancement(r2,c2,col)>advDir) passed=false;
+                            }
+                        }
+                    }
+            }
+            if(passed) score+=30+advDir*5;
+        }
+    return score;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Main evaluation from AI's perspective (higher = better for AI)
+//  In 4-player FFA, strategy is:
+//   1) Maximise own material & position
+//   2) Minimise the strongest opponent (threat management)
+//   3) Score captures optimally
+// ─────────────────────────────────────────────────────────────────────────────
+int evaluate(const Board& b, Color aiColor){
+    if(b.ps[aiColor].eliminated) return -INF/2;
+
+    // Count active opponents
+    int activeOpps=0;
+    for(int oc=1;oc<=4;oc++)
+        if((Color)oc!=aiColor && !b.ps[(Color)oc].eliminated) activeOpps++;
+
+    if(activeOpps==0) return INF/2; // AI wins
+
+    int aiScore=0;
+
+    // ── Own material + PST
+    int ownMat=0, ownPst=0;
+    for(int r=0;r<ROWS;r++)
+        for(int c=0;c<COLS;c++){
+            auto& p=b.cells[r][c];
+            if(p.color==aiColor){
+                ownMat += PieceVal::get(p.type);
+                ownPst += Board::pst(p.type, aiColor, r, c);
+            }
+        }
+    aiScore += ownMat + ownPst;
+
+    // ── Game-score bonus (captures already made)
+    aiScore += b.ps[aiColor].score * 15;
+
+    // ── King safety
+    Board& bm = const_cast<Board&>(b);
+    aiScore += kingSafety(b, aiColor);
+
+    // ── Pawn structure
+    aiScore += pawnStructure(b, aiColor);
+
+    // ── Mobility
+    aiScore += mobilityScore(bm, aiColor);
+
+    // ── Opponent evaluation (we want opponents weak)
+    int strongestOppMat=0;
+    for(int oc=1;oc<=4;oc++){
+        Color opp=(Color)oc;
+        if(opp==aiColor || b.ps[opp].eliminated) continue;
+
+        int oppMat=b.materialOf(opp);
+        int oppPst=0;
+        for(int r=0;r<ROWS;r++)
+            for(int c=0;c<COLS;c++){
+                auto& p=b.cells[r][c];
+                if(p.color==opp) oppPst+=Board::pst(p.type,opp,r,c);
+            }
+        int oppTotal = oppMat + oppPst + kingSafety(b,opp) + pawnStructure(b,opp);
+
+        // Subtract opponent's strength (we want them weak)
+        aiScore -= oppTotal / 3;
+
+        // Track strongest opponent (biggest threat)
+        if(oppMat > strongestOppMat) strongestOppMat = oppMat;
+    }
+
+    // ── Threat bonus: extra reward for threatening the strongest opponent
+    // (Target the leader — classic FFA strategy)
+    aiScore -= strongestOppMat / 5;
+
+    // ── Endgame adjustment: if only one opponent left, play to win decisively
+    if(activeOpps==1){
+        aiScore += ownMat - strongestOppMat; // maximize material advantage
+    }
+
+    return aiScore;
+}
+
+} // namespace Eval
