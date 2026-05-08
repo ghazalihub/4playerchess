@@ -447,10 +447,12 @@ void Game::start(bool proto){
             std::cout << "turn " << colorNameLower(cur) << "\n";
         }
 
-        if(!proto && cur==RED){
+        if(cur==RED){
             doAiMove(board, engine, proto);
-            printBoard();
-            printScores();
+            if(!proto) {
+                printBoard();
+                printScores();
+            }
             continue;
         }
 
@@ -570,9 +572,6 @@ void Game::start(bool proto){
                 printScores();
             } else {
                 std::cout << "moveok\n";
-                if(board.currentPlayer() == RED){
-                    doAiMove(board, engine, proto);
-                }
             }
         }
     }

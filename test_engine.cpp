@@ -16,7 +16,6 @@ void test_ai_makes_move() {
     e.maxDepth = 2;
     SearchResult res = e.search(b);
     assert(res.bestMove.valid());
-    (void)res;
     std::cout << "AI move generation test passed.\n";
 }
 
@@ -73,14 +72,11 @@ void test_draw_repetition() {
     b.reset();
     Zobrist::init();
 
-    // Initial position hash
-    uint64_t h1 = b.hash;
-    (void)h1;
-
     // Move 1: Red Rook out and back (Red moves first)
-    Move r1 = {3, 13, 3, 11, NONE, false, false, false}; // Red Rook (3,13) to (3,11)
+    // Red rook is at (3,13). (3,11) is 2 steps left.
+    Move r1 = {3, 13, 3, 11, NONE, false, false, false};
     b.applyMove(r1);
-    Move r2 = {3, 11, 3, 13, NONE, false, false, false}; // Red Rook back
+    Move r2 = {3, 11, 3, 13, NONE, false, false, false};
     b.applyMove(r2);
 
     // Repeat

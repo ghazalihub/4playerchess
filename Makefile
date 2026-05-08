@@ -15,7 +15,7 @@ BENCH_SRCS := benchmark.cpp board.cpp eval.cpp search.cpp game.cpp
 BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 BENCH_TARGET := benchmark
 
-.PHONY: all clean debug profile test bench selfplay gui
+.PHONY: all clean debug profile test bench selfplay gui webgui
 
 all: $(TARGET)
 
@@ -46,6 +46,9 @@ selfplay: $(TARGET)
 
 gui: $(TARGET)
 	python3 gui.py
+
+webgui: $(TARGET)
+	python3 web_gui.py
 
 debug: CXXFLAGS = -std=c++17 -O0 -g -fsanitize=address,undefined -Wall -Wextra
 debug: LDFLAGS  = -fsanitize=address,undefined

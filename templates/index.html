@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chess4 - 4 Player FFA</title>
+    <style>
+        body { font-family: sans-serif; background: #222; color: #fff; text-align: center; }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(14, 40px);
+            grid-template-rows: repeat(14, 40px);
+            gap: 0;
+            width: 560px;
+            margin: 20px auto;
+            border: 5px solid #444;
+        }
+        .cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+        }
+        .light { background-color: #99ccff; }
+        .dark { background-color: #6fa8dc; }
+        .dead { background-color: #333; cursor: default; }
+        .selected { outline: 3px solid yellow; z-index: 10; }
+        .piece {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            text-shadow: 1px 1px 2px #000;
+        }
+        .red { background-color: #ff0000; }
+        .black { background-color: #000000; }
+        .green { background-color: #00ff00; }
+        .blue { background-color: #0000ff; }
+        #status { font-size: 1.2em; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Chess4 — 4 Player FFA</h1>
+    <div id="status">Waiting for engine...</div>
+    <div id="board"></div>
+    <p>Click piece to select, then click target square. (Red is AI)</p>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const boardDiv = document.getElementById('board');
+        const statusDiv = document.getElementById('status');
+        let selected = null;
+        let boardState = {};
+
+        function inBounds(r, c) {
+            if (r < 0 || r >= 14 || c < 0 || c >= 14) return false;
+            if (r < 3 && c < 3) return false;
+            if (r < 3 && c > 10) return false;
+            if (r > 10 && c < 3) return false;
+            if (r > 10 && c > 10) return false;
+            return true;
+        }
+
+        function createBoard() {
+            boardDiv.innerHTML = '';
+            for (let r = 0; r < 14; r++) {
+                for (let c = 0; c < 14; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+                    if (!inBounds(r, c)) cell.className = 'cell dead';
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    cell.onclick = () => handleClick(r, c);
+
+                    const pieceData = boardState[`${r},${c}`];
+                    if (pieceData) {
+                        const piece = document.createElement('div');
+                        piece.className = 'piece ' + pieceData.color;
+                        piece.innerText = pieceData.type;
+                        cell.appendChild(piece);
+                    }
+
+                    if (selected && selected.r === r && selected.c === c) {
+                        cell.classList.add('selected');
+                    }
+
+                    boardDiv.appendChild(cell);
+                }
+            }
+        }
+
+        function handleClick(r, c) {
+            if (!inBounds(r, c)) return;
+            if (selected) {
+                if (selected.r === r && selected.c === c) {
+                    selected = null;
+                } else {
+                    const move = toAlgebraic(selected.r, selected.c) + toAlgebraic(r, c);
+                    socket.emit('move', move);
+                    selected = null;
+                }
+            } else {
+                if (boardState[`${r},${c}`]) {
+                    selected = { r, c };
+                }
+            }
+            createBoard();
+        }
+
+        function toAlgebraic(r, c) {
+            return String.fromCharCode(97 + c) + (r + 1);
+        }
+
+        socket.on('update', (data) => {
+            boardState = data.board;
+            statusDiv.innerText = "Turn: " + data.turn.charAt(0).toUpperCase() + data.turn.slice(1);
+            if (data.winner) statusDiv.innerText = "GAME OVER! Winner: " + data.winner;
+            createBoard();
+        });
+
+        socket.on('illegal', () => {
+            alert("Illegal move!");
+        });
+
+        socket.on('connect', () => {
+            socket.emit('request_sync');
+        });
+    </script>
+</body>
+</html>
