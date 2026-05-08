@@ -6,7 +6,16 @@ TARGET   := chess4
 SRCS     := main.cpp board.cpp eval.cpp search.cpp game.cpp
 OBJS     := $(SRCS:.cpp=.o)
 
-.PHONY: all clean debug profile
+# Test and Benchmark files
+TEST_SRCS := test_engine.cpp board.cpp eval.cpp search.cpp game.cpp
+TEST_OBJS := $(TEST_SRCS:.cpp=.o)
+TEST_TARGET := test_engine
+
+BENCH_SRCS := benchmark.cpp board.cpp eval.cpp search.cpp game.cpp
+BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
+BENCH_TARGET := benchmark
+
+.PHONY: all clean debug profile test bench
 
 all: $(TARGET)
 
@@ -14,11 +23,23 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo ""
 	@echo "  Build complete: ./$(TARGET)"
-	@echo "  Usage:  ./chess4 [--depth N] [--time MS]"
+	@echo "  Usage:  ./$(TARGET) [--depth N] [--time MS]"
 	@echo ""
 
 %.o: %.cpp chess4.hpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+bench: $(BENCH_TARGET)
+	./$(BENCH_TARGET)
+
+$(BENCH_TARGET): $(BENCH_OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 debug: CXXFLAGS = -std=c++17 -O0 -g -fsanitize=address,undefined -Wall -Wextra
 debug: LDFLAGS  = -fsanitize=address,undefined
@@ -29,4 +50,4 @@ profile: LDFLAGS  += -pg
 profile: $(TARGET)
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f *.o $(TARGET) $(TEST_TARGET) $(BENCH_TARGET)

@@ -123,6 +123,7 @@ struct Board {
     }
 
     Sq findKing(Color col) const;
+    bool isAttacked(int r, int c, Color attacker) const;
     bool isInCheck(Color col) const;
     bool isCheckmated(Color col);
     bool isStalemate(Color col);
@@ -133,6 +134,9 @@ struct Board {
     void genAllMoves(Color col, std::vector<Move>& out) const;
     // Generate fully legal moves (king not left/put in check)
     void legalMoves(Color col, std::vector<Move>& out);
+
+    // Pawn capture diagonals (perpendicular to forward)
+    static void pawnCapDeltas(Color col, int ds[2][2]);
 
     void applyMove(const Move& m);
     void undoMove(const Move& m, Board& saved); // copies saved back
@@ -189,12 +193,21 @@ struct SearchResult {
     long nodes    = 0;
 };
 
+/**
+ * @brief The Engine class implements the search and evaluation logic for Chess4.
+ * Uses Paranoid Alpha-Beta search with Iterative Deepening.
+ */
 class Engine {
 public:
-    Color aiColor = RED;          // AI always plays Red
-    int   maxDepth = 5;
-    long  timeLimit_ms = 5000;    // 5 seconds per move default
+    Color aiColor = RED;          ///< AI always plays Red
+    int   maxDepth = 5;           ///< Maximum search depth
+    long  timeLimit_ms = 5000;    ///< Time limit per move in milliseconds
 
+    /**
+     * @brief Performs iterative deepening search to find the best move for the AI.
+     * @param b The current board state.
+     * @return SearchResult containing the best move, score, and statistics.
+     */
     SearchResult search(Board& b);
 
 private:
@@ -202,17 +215,30 @@ private:
     std::chrono::steady_clock::time_point deadline_;
     bool timesUp() const;
 
-    // Paranoid search: AI maximises own score, opponents all minimise AI score
-    int paranoidSearch(Board& b, int depth, int alpha, int beta, Color perspective);
+    /**
+     * @brief Core search function using the Paranoid Model for FFA.
+     * AI (max player) seeks to maximize its score, while all other players (min players)
+     * are assumed to collude to minimize the AI's score.
+     */
+    int paranoidSearch(Board& b, int depth, int alpha, int beta, Color perspective, int ply);
 
-    // Quiescence search
+    /**
+     * @brief Quiescence search to handle the horizon effect by searching tactical moves.
+     */
     int quiesce(Board& b, int alpha, int beta);
 
-    // Move ordering: returns sorted moves (best first)
-    void orderMoves(std::vector<Move>& moves, const Board& b, const Move& ttMove);
+    /**
+     * @brief Sorts moves to improve Alpha-Beta pruning efficiency.
+     * Priority: TT move > Captures (MVV-LVA) > Killer Moves > PST improvements.
+     */
+    void orderMoves(std::vector<Move>& moves, const Board& b, const Move& ttMove, int ply);
 
-    // Static exchange evaluation (for move ordering captures)
+    /**
+     * @brief Static exchange evaluation to estimate the value of a capture sequence.
+     */
     int see(const Board& b, Move m) const;
+
+    Move killerMoves[64][2]; ///< Moves that caused a beta cutoff at a specific ply
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

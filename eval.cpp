@@ -28,7 +28,9 @@ static float centerDist(int r, int c){
 // Generic bonus: pieces want to be near center
 static int centerBonus(int r, int c, int scale=5){
     float d = centerDist(r,c);
-    return (int)(scale * (9.0f - d));
+    // Center of 14x14 is around (6.5, 6.5)
+    // Max distance is sqrt(6.5^2 + 6.5^2) approx 9.19
+    return (int)(scale * (9.2f - d));
 }
 
 // For a player, "advancement" = how far their pieces have moved into enemy territory
@@ -71,14 +73,15 @@ static int rookBonus(int r, int c, Color col){
 }
 
 // Queen: highly valuable in center
-static int queenBonus(int r, int c, Color col){
+static int queenBonus(int r, int c, Color /*col*/){
     return centerBonus(r,c,3);
 }
 
 // King: safety — stay near back rank in midgame
 static int kingMidgameBonus(int r, int c, Color col){
     int adv = advancement(r,c,col);
-    int penalty = adv * 8; // penalise for being far from back
+    // Penalize for being far from back rank, especially if very far
+    int penalty = adv * 10 + (adv > 2 ? (adv-2)*(adv-2)*5 : 0);
     return -penalty;
 }
 
@@ -95,8 +98,14 @@ int Board::pst(PieceType t, Color col, int r, int c){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @brief Namespace containing all static evaluation logic.
+ */
 namespace Eval {
 
+/**
+ * @brief Calculates a mobility score based on the number of legal moves.
+ */
 int mobilityScore(Board& b, Color col){
     if(b.ps[col].eliminated) return 0;
     std::vector<Move> moves;
@@ -104,6 +113,10 @@ int mobilityScore(Board& b, Color col){
     return (int)moves.size() * 2;
 }
 
+/**
+ * @brief Evaluates the safety of the king for a given player.
+ * Considers direct attacks, proximity of enemy pieces, and pawn shields.
+ */
 int kingSafety(const Board& b, Color col){
     if(b.ps[col].eliminated) return 0;
     Sq king = b.findKing(col);
@@ -114,12 +127,19 @@ int kingSafety(const Board& b, Color col){
     for(int oc=1;oc<=4;oc++){
         Color opp=(Color)oc;
         if(opp==col || b.ps[opp].eliminated) continue;
-        std::vector<Move> omoves;
-        b.genAllMoves(opp, omoves);
-        for(auto& m:omoves){
-            int dr=std::abs(m.tr-king.r), dc=std::abs(m.tc-king.c);
-            if(dr<=1 && dc<=1) penalty+=15;     // attack adjacent to king
-            if(m.tr==king.r && m.tc==king.c) penalty+=50; // direct attack
+
+        // Use efficient isAttacked for direct check
+        if(b.isAttacked(king.r, king.c, opp)) penalty += 100;
+
+        // Check surrounding 8 squares
+        for(int dr=-1;dr<=1;dr++){
+            for(int dc=-1;dc<=1;dc++){
+                if(dr==0 && dc==0) continue;
+                int nr=king.r+dr, nc=king.c+dc;
+                if(inBounds(nr,nc) && b.isAttacked(nr, nc, opp)){
+                    penalty += 25;
+                }
+            }
         }
     }
     // Bonus for having pawns near king
@@ -166,7 +186,6 @@ int pawnStructure(const Board& b, Color col){
                     for(int c2=0;c2<COLS;c2++){
                         auto& op=b.cells[r2][c2];
                         if(op.type==P && op.color==opp){
-                            int adjAdv=advancement(r2,c2,opp);
                             // Rough check: enemy pawn ahead on same lane
                             if(col==BLACK||col==BLUE){
                                 if(std::abs(c2-c)<=1 && advancement(r2,c2,col)>advDir) passed=false;
@@ -188,6 +207,12 @@ int pawnStructure(const Board& b, Color col){
 //   2) Minimise the strongest opponent (threat management)
 //   3) Score captures optimally
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @brief The main static evaluation function.
+ * @param b The board state to evaluate.
+ * @param aiColor The perspective from which to evaluate (usually RED).
+ * @return Score in centipawns. Positive favors aiColor.
+ */
 int evaluate(const Board& b, Color aiColor){
     if(b.ps[aiColor].eliminated) return -INF/2;
 
@@ -235,6 +260,7 @@ int evaluate(const Board& b, Color aiColor){
         int oppPst=0;
         for(int r=0;r<ROWS;r++)
             for(int c=0;c<COLS;c++){
+                if(!inBounds(r,c)) continue;
                 auto& p=b.cells[r][c];
                 if(p.color==opp) oppPst+=Board::pst(p.type,opp,r,c);
             }

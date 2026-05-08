@@ -142,7 +142,7 @@ std::string Game::moveToStr(const Move& m) const {
     return oss.str();
 }
 
-std::optional<Move> Game::strToMove(const std::string& s, Color col) const {
+std::optional<Move> Game::strToMove(const std::string& s, Color /*col*/) const {
     // Accept two formats:
     // 1) "r c r c"  e.g. "3 12 4 12"
     // 2) "a1b2"     algebraic

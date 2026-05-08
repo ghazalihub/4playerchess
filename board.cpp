@@ -25,6 +25,13 @@ TTEntry g_tt[TT_SIZE];
 // ─────────────────────────────────────────────────────────────────────────────
 //  Board helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Sets a piece at (r,c) and updates the Zobrist hash incrementally.
+ * @param r Row index
+ * @param c Column index
+ * @param p Piece to place
+ */
 void Board::set(int r, int c, Piece p){
     if(!inBounds(r,c)) return;
     Piece old = cells[r][c];
@@ -113,7 +120,7 @@ static void pawnDelta(Color col, int& dr, int& dc){
     }
 }
 // Pawn capture diagonals (perpendicular to forward)
-static void pawnCapDeltas(Color col, int ds[2][2]){
+void Board::pawnCapDeltas(Color col, int ds[2][2]){
     switch(col){
         case BLACK: ds[0][0]=1; ds[0][1]=-1; ds[1][0]=1; ds[1][1]=1; break;
         case BLUE:  ds[0][0]=-1; ds[0][1]=-1; ds[1][0]=-1; ds[1][1]=1; break;
@@ -261,6 +268,65 @@ void Board::genAllMoves(Color col, std::vector<Move>& out) const {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Check detection
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Efficiently determines if a square is attacked by a specific player.
+ * Avoids full move generation by scanning outwards from the target square.
+ * @param r Target row
+ * @param c Target column
+ * @param attacker Color of the potential attacking player
+ * @return true if the square is attacked
+ */
+bool Board::isAttacked(int r, int c, Color attacker) const {
+    // Knight
+    static const int kn[8][2]={{-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}};
+    for(auto& d:kn){
+        int nr=r+d[0], nc=c+d[1];
+        if(inBounds(nr,nc)){
+            Piece p = cells[nr][nc];
+            if(p.type==N && p.color==attacker) return true;
+        }
+    }
+    // King
+    for(int dr=-1;dr<=1;dr++)
+        for(int dc=-1;dc<=1;dc++)
+            if(dr||dc){
+                int nr=r+dr, nc=c+dc;
+                if(inBounds(nr,nc)){
+                    Piece p = cells[nr][nc];
+                    if(p.type==K && p.color==attacker) return true;
+                }
+            }
+    // Sliding pieces
+    auto slide = [&](int dr, int dc, PieceType t1, PieceType t2){
+        int nr=r+dr, nc=c+dc;
+        while(inBounds(nr,nc)){
+            Piece p = cells[nr][nc];
+            if(!p.empty()){
+                if(p.color==attacker && (p.type==t1 || p.type==t2 || p.type==Q)) return true;
+                break;
+            }
+            nr+=dr; nc+=dc;
+        }
+        return false;
+    };
+    if(slide(1,0, R, R) || slide(-1,0, R, R) || slide(0,1, R, R) || slide(0,-1, R, R)) return true;
+    if(slide(1,1, B, B) || slide(1,-1, B, B) || slide(-1,1, B, B) || slide(-1,-1, B, B)) return true;
+
+    // Pawns: if 'attacker' has a pawn at (pr,pc) that can capture (r,c)
+    int ds[2][2];
+    Board::pawnCapDeltas(attacker, ds);
+    for(int i=0;i<2;i++){
+        int pr = r - ds[i][0];
+        int pc = c - ds[i][1];
+        if(inBounds(pr,pc)){
+            Piece p = cells[pr][pc];
+            if(p.type==P && p.color==attacker) return true;
+        }
+    }
+    return false;
+}
+
 bool Board::isInCheck(Color col) const {
     Sq king = findKing(col);
     if(king.r<0) return true; // no king = in check
@@ -268,10 +334,7 @@ bool Board::isInCheck(Color col) const {
     for(int oc=1;oc<=4;oc++){
         Color opp=(Color)oc;
         if(opp==col || ps[opp].eliminated) continue;
-        std::vector<Move> moves;
-        genAllMoves(opp, moves);
-        for(auto& m:moves)
-            if(m.tr==king.r && m.tc==king.c) return true;
+        if(isAttacked(king.r, king.c, opp)) return true;
     }
     return false;
 }
