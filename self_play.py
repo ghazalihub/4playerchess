@@ -26,9 +26,9 @@ def run_self_play(games=1):
                 line = process.stdout.readline()
                 if not line: break
                 # print(f"DEBUG: {line.strip()}")
-                if "BESTMOVE" in line:
+                if "bestmove" in line:
                     parts = line.split()
-                    idx = parts.index("BESTMOVE")
+                    idx = parts.index("bestmove")
                     bestmove = parts[idx+1]
                     break
                 if "gameover" in line or "draw" in line:

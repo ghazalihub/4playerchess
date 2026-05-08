@@ -3,6 +3,7 @@ import subprocess
 import sys
 import threading
 import queue
+import time
 
 # Constants
 WIDTH, HEIGHT = 800, 800
@@ -18,6 +19,7 @@ BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
+YELLOW = (255, 255, 0)
 
 class ChessEngine:
     def __init__(self):
@@ -40,6 +42,7 @@ class ChessEngine:
             q.put(line.strip())
 
     def send(self, cmd):
+        # print(f"DEBUG SEND: {cmd}")
         self.process.stdin.write(cmd + '\n')
         self.process.stdin.flush()
 
@@ -63,35 +66,18 @@ class GUI:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Chess4 - 4 Player FFA")
         self.engine = ChessEngine()
-        self.board = self.reset_board()
+        self.board = [[None for _ in range(14)] for _ in range(14)]
         self.selected = None
-        self.history = []
-        self.turn_color = "Red" # Starting color
+        self.pending_move = None
+        self.turn_color = "red"
+        self.winner = None
+
         self.engine.send("proto")
+        self.engine.send("ready")
+        self.sync_board()
 
-    def reset_board(self):
-        # Initial piece setup (Simplified for GUI visualization)
-        board = [[None for _ in range(14)] for _ in range(14)]
-        back_row = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
-
-        # Black (Top)
-        for i, p in enumerate(back_row):
-            board[0][3+i] = ('Black', p)
-            board[1][3+i] = ('Black', 'P')
-        # Blue (Bottom)
-        for i, p in enumerate(back_row):
-            board[13][3+i] = ('Blue', p)
-            board[12][3+i] = ('Blue', 'P')
-        # Green (Left)
-        for i, p in enumerate(back_row):
-            board[3+i][0] = ('Green', p)
-            board[3+i][1] = ('Green', 'P')
-        # Red (Right)
-        for i, p in enumerate(back_row):
-            board[3+i][13] = ('Red', p)
-            board[3+i][12] = ('Red', 'P')
-
-        return board
+    def sync_board(self):
+        self.engine.send("board")
 
     def draw_board(self):
         for r in range(ROWS):
@@ -104,9 +90,8 @@ class GUI:
                 piece = self.board[r][c]
                 if piece:
                     p_color_name, p_type = piece
-                    p_color = RED if p_color_name == 'Red' else BLACK if p_color_name == 'Black' else GREEN if p_color_name == 'Green' else BLUE
+                    p_color = RED if p_color_name == 'red' else BLACK if p_color_name == 'black' else GREEN if p_color_name == 'green' else BLUE
 
-                    # Draw piece as a circle with a letter
                     center = (c * SQUARE_SIZE + SQUARE_SIZE // 2, r * SQUARE_SIZE + SQUARE_SIZE // 2)
                     pygame.draw.circle(self.screen, p_color, center, SQUARE_SIZE // 2 - 5)
                     font = pygame.font.SysFont("Arial", 24, bold=True)
@@ -115,7 +100,15 @@ class GUI:
 
         if self.selected:
             r, c = self.selected
-            pygame.draw.rect(self.screen, (255, 255, 0), (c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
+            pygame.draw.rect(self.screen, YELLOW, (c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
+
+        # Draw status
+        font = pygame.font.SysFont("Arial", 20, bold=True)
+        status = f"Turn: {self.turn_color.capitalize()}"
+        if self.winner:
+            status = f"GAME OVER! Winner: {self.winner.capitalize()}"
+        text = font.render(status, True, WHITE)
+        self.screen.blit(text, (10, 10))
 
     def to_algebraic(self, r, c):
         col = chr(ord('a') + c)
@@ -123,6 +116,7 @@ class GUI:
         return col + row
 
     def handle_click(self, pos):
+        if self.winner: return
         c, r = pos[0] // SQUARE_SIZE, pos[1] // SQUARE_SIZE
         if not in_bounds(r, c): return
 
@@ -131,59 +125,45 @@ class GUI:
                 self.selected = None
             else:
                 move_str = self.to_algebraic(*self.selected) + self.to_algebraic(r, c)
+                self.pending_move = (self.selected, (r, c))
                 self.engine.send(move_str)
-                self.history.append(move_str)
-                self.apply_move_to_local_board(self.selected, (r, c))
                 self.selected = None
-                self.update_engine_state()
         else:
-            if self.board[r][c]:
+            piece = self.board[r][c]
+            if piece and piece[0] == self.turn_color and self.turn_color != "red":
                 self.selected = (r, c)
-
-    def apply_move_to_local_board(self, src, dst):
-        piece = self.board[src[0]][src[1]]
-        self.board[src[0]][src[1]] = None
-        self.board[dst[0]][dst[1]] = piece
-
-    def update_engine_state(self):
-        cmd = "position startpos moves " + " ".join(self.history)
-        self.engine.send(cmd)
 
     def parse_engine_output(self):
         lines = self.engine.get_output()
         for line in lines:
-            if "BESTMOVE" in line:
-                # Example: ... BESTMOVE m7k7 ...
+            # print(f"ENGINE: {line}")
+            if line == "moveok":
+                self.pending_move = None
+                self.sync_board()
+            elif line == "illegal":
+                print("Illegal move reported by engine.")
+                self.pending_move = None
+            elif line.startswith("bestmove"):
+                self.sync_board()
+            elif line.startswith("turn"):
+                self.turn_color = line.split()[1]
+            elif line.startswith("gameover"):
+                self.winner = line.split()[1]
+            elif line.startswith("boardok"):
+                pass
+            elif line == "board":
+                # Clear board for full refresh
+                self.board = [[None for _ in range(14)] for _ in range(14)]
+            elif len(line.split()) == 4:
+                # Board data: r c color type
                 parts = line.split()
                 try:
-                    idx = parts.index("BESTMOVE")
-                    move_str = parts[idx+1]
-                    self.history.append(move_str)
-
-                    # Parse move_str to update local board
-                    # a1b2
-                    sc = ord(move_str[0]) - ord('a')
-                    # find where second col letter starts
-                    p2=1
-                    while p2<len(move_str) and move_str[p2].isdigit(): p2+=1
-                    sr = int(move_str[1:p2]) - 1
-                    tc = ord(move_str[p2]) - ord('a')
-                    tr = int(move_str[p2+1:]) - 1
-
-                    self.apply_move_to_local_board((sr, sc), (tr, tc))
-                    print(f"AI Move: {move_str}")
-                except Exception as e:
-                    print(f"Error parsing AI move: {e} in line: {line}")
-            elif "move ok" in line:
+                    r, c = int(parts[0]), int(parts[1])
+                    color, p_type = parts[2], parts[3]
+                    self.board[r][c] = (color, p_type)
+                except: pass
+            elif line == "protook" or line == "readyok":
                 pass
-            elif "Illegal move" in line:
-                print("Engine reported illegal move. Rolling back history.")
-                if self.history: self.history.pop()
-                self.board = self.reset_board()
-                # Replay history
-                for h in self.history:
-                    # Very simple replay
-                    pass
 
     def run(self):
         clock = pygame.time.Clock()
@@ -194,14 +174,8 @@ class GUI:
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     self.handle_click(pygame.mouse.get_pos())
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        self.engine.send("go")
 
             self.parse_engine_output()
-            # In a real GUI, we'd need to re-parse the entire board state from the engine
-            # or track all moves perfectly. For this task, we visualize the starting position
-            # and allow sending moves.
 
             self.screen.fill((0, 0, 0))
             self.draw_board()

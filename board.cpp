@@ -8,7 +8,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Zobrist {
     uint64_t table[5][7][ROWS][COLS];
-    uint64_t sideToMove[5];
+    uint64_t sideToMove[4];
+    uint64_t castle[4][2];
+    uint64_t enPassant[COLS];
     void init(){
         std::mt19937_64 rng(0xDEADBEEFCAFEBABEULL);
         for(int c=1;c<=4;c++)
@@ -16,7 +18,9 @@ namespace Zobrist {
                 for(int r=0;r<ROWS;r++)
                     for(int cc=0;cc<COLS;cc++)
                         table[c][t][r][cc] = rng();
-        for(int i=0;i<5;i++) sideToMove[i]=rng();
+        for(int i=0;i<4;i++) sideToMove[i]=rng();
+        for(int i=0;i<4;i++) for(int j=0;j<2;j++) castle[i][j]=rng();
+        for(int i=0;i<COLS;i++) enPassant[i]=rng();
     }
 }
 
@@ -48,11 +52,13 @@ void Board::reset(){
     memset(cells, 0, sizeof(cells));
     for(int i=1;i<=4;i++) ps[i] = PlayerState{};
     turnIdx = 0;
-    hash = 0;
     enPassantSq = {-1, -1};
     halfmoveClock = 0;
     history.clear();
     turnOrder[0]=RED; turnOrder[1]=BLACK; turnOrder[2]=GREEN; turnOrder[3]=BLUE;
+
+    hash = 0;
+    hash ^= Zobrist::sideToMove[turnIdx];
 
     // Black at top (rows 0-1, cols 3-10), moves DOWN
     for(int i=0;i<8;i++){
@@ -414,21 +420,25 @@ void Board::applyMove(const Move& mv){
     }
 
     // Set new En Passant square
+    if(enPassantSq.r != -1) hash ^= Zobrist::enPassant[enPassantSq.c];
     enPassantSq = {-1, -1};
     if(mover.type==P && std::abs(mv.tr-mv.sr)+std::abs(mv.tc-mv.sc)==2){
         // Double push
         int dr, dc;
         pawnDelta(col, dr, dc);
         enPassantSq = {mv.sr + dr, mv.sc + dc};
+        hash ^= Zobrist::enPassant[enPassantSq.c];
     }
 
     // Record history for repetition
     history.push_back(hash);
 
     // Advance turn index
+    hash ^= Zobrist::sideToMove[turnIdx];
     int next=(turnIdx+1)%4;
     while(ps[turnOrder[next]].eliminated && next!=turnIdx) next=(next+1)%4;
     turnIdx=next;
+    hash ^= Zobrist::sideToMove[turnIdx];
 }
 
 void Board::undoMove(const Move& /*mv*/, Board& saved){

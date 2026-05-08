@@ -22,8 +22,9 @@ Chess4 is a high-performance terminal-based **4-player Free-for-All chess engine
 8. [Move Notation](#move-notation)
 9. [Engine Architecture](#engine-architecture)
 10. [AI Strategy & Theory](#ai-strategy--theory)
-11. [Tuning & Extending](#tuning--extending)
-12. [Known Limitations & Roadmap](#known-limitations--roadmap)
+11. [Machine Protocol](#machine-protocol)
+12. [Tuning & Extending](#tuning--extending)
+13. [Known Limitations & Roadmap](#known-limitations--roadmap)
 
 ---
 
@@ -188,6 +189,30 @@ Columns are `a-n` (0-13), rows are `1-14` (0-13).
 - **Material & Position:** Piece-Square Tables (PST) optimized for the 14x14 board.
 - **FFA Dynamics:** Specifically penalizes the strongest opponent ("Target the Leader") and values accumulated game points.
 - **Advanced King Safety:** Penalizes exposure to multiple opponents and rewards pawn shields.
+
+---
+
+## Machine Protocol
+
+Chess4 supports a strict machine-readable protocol for GUI and tool integration, enabled via the `--proto` flag.
+
+### Input Commands
+- `proto`: Handshake command. Engine responds with `protook`.
+- `ready`: Check if engine is ready. Responds with `readyok`.
+- `position startpos moves <moves...>`: Setup the board.
+- `go`: Trigger AI search and move for the current player.
+- `board`: Request full board dump. Responds with multiple `row col color type` lines followed by `boardok`.
+- `<move>`: Send a human move (e.g., `h2h4`). Engine responds with `moveok` or `illegal`.
+
+### Output Tokens
+- `protook`: Initial handshake success.
+- `readyok`: Engine is ready for commands.
+- `moveok`: Move accepted and applied.
+- `illegal`: Move rejected.
+- `bestmove <move>`: AI's chosen move in algebraic format.
+- `turn <color>`: Explicit notification of the current player's turn.
+- `gameover <winner>`: Game has ended with the specified winner.
+- `draw`: Game ended in a draw.
 
 ---
 

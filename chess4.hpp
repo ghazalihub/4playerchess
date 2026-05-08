@@ -102,7 +102,9 @@ struct PlayerState {
 namespace Zobrist {
     // [color 1-4][piece 1-6][row][col]
     extern uint64_t table[5][7][ROWS][COLS];
-    extern uint64_t sideToMove[5]; // whose turn hash
+    extern uint64_t sideToMove[4]; // 4 players
+    extern uint64_t castle[4][2];  // [player][K=0, Q=1]
+    extern uint64_t enPassant[COLS]; // file-based EP hash
     void init();
 }
 
@@ -272,6 +274,7 @@ class Game {
 public:
     Board board;
     Engine engine;
+    bool protoMode = false;
 
     void start(bool proto = false);  // enter interactive loop (optional protocol mode)
     void printBoard() const;

@@ -16,6 +16,7 @@ void test_ai_makes_move() {
     e.maxDepth = 2;
     SearchResult res = e.search(b);
     assert(res.bestMove.valid());
+    (void)res;
     std::cout << "AI move generation test passed.\n";
 }
 
@@ -74,13 +75,12 @@ void test_draw_repetition() {
 
     // Initial position hash
     uint64_t h1 = b.hash;
+    (void)h1;
 
-    // Move 1: Knight out and back
-    Move m1 = {0, 4, 2, 3, NONE, false, false, false}; // Black knight at row 0 col 4
-    // Wait, it's RED turn first.
-    Move r1 = {3, 13, 5, 12, NONE, false, false, false}; // Red knight (3,13) to (5,12)
+    // Move 1: Red Rook out and back (Red moves first)
+    Move r1 = {3, 13, 3, 11, NONE, false, false, false}; // Red Rook (3,13) to (3,11)
     b.applyMove(r1);
-    Move r2 = {5, 12, 3, 13, NONE, false, false, false}; // Red knight back
+    Move r2 = {3, 11, 3, 13, NONE, false, false, false}; // Red Rook back
     b.applyMove(r2);
 
     // Repeat
