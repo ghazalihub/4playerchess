@@ -49,6 +49,9 @@ void Board::reset(){
     for(int i=1;i<=4;i++) ps[i] = PlayerState{};
     turnIdx = 0;
     hash = 0;
+    enPassantSq = {-1, -1};
+    halfmoveClock = 0;
+    history.clear();
     turnOrder[0]=RED; turnOrder[1]=BLACK; turnOrder[2]=GREEN; turnOrder[3]=BLUE;
 
     // Black at top (rows 0-1, cols 3-10), moves DOWN
@@ -176,9 +179,14 @@ void Board::genMovesFor(int r, int c, std::vector<Move>& out) const {
             int ds[2][2]; pawnCapDeltas(col,ds);
             for(int i=0;i<2;i++){
                 int ar=r+ds[i][0], ac=c+ds[i][1];
-                if(inBounds(ar,ac) && isEnemy(cells[ar][ac],col)){
-                    PieceType promo = shouldPromote(ar,ac,col) ? Q : NONE;
-                    tryPush(ar,ac,promo);
+                if(inBounds(ar,ac)){
+                    if(isEnemy(cells[ar][ac],col)){
+                        PieceType promo = shouldPromote(ar,ac,col) ? Q : NONE;
+                        tryPush(ar,ac,promo);
+                    } else if(ar==enPassantSq.r && ac==enPassantSq.c){
+                        Move em; em.sr=r; em.sc=c; em.tr=ar; em.tc=ac; em.isEnPassant=true;
+                        out.push_back(em);
+                    }
                 }
             }
             break;
@@ -387,9 +395,35 @@ void Board::applyMove(const Move& mv){
         if(inBounds(nrr,nrc)) set(nrr,nrc,rook);
     }
 
+    Piece victim = cells[mv.tr][mv.tc];
+
+    // Update halfmove clock: reset on pawn move or capture
+    if(mover.type==P || !victim.empty()) halfmoveClock = 0;
+    else halfmoveClock++;
+
     set(mv.sr, mv.sc, NO_PIECE);
     Piece landing = mv.promotion!=NONE ? Piece{mv.promotion, col} : mover;
     set(mv.tr, mv.tc, landing);
+
+    // Handle En Passant capture
+    if(mv.isEnPassant){
+        int dr, dc;
+        pawnDelta(col, dr, dc);
+        // The captured pawn is one step BEHIND the target square in the perspective of the mover
+        set(mv.tr - dr, mv.tc - dc, NO_PIECE);
+    }
+
+    // Set new En Passant square
+    enPassantSq = {-1, -1};
+    if(mover.type==P && std::abs(mv.tr-mv.sr)+std::abs(mv.tc-mv.sc)==2){
+        // Double push
+        int dr, dc;
+        pawnDelta(col, dr, dc);
+        enPassantSq = {mv.sr + dr, mv.sc + dc};
+    }
+
+    // Record history for repetition
+    history.push_back(hash);
 
     // Advance turn index
     int next=(turnIdx+1)%4;
@@ -439,6 +473,16 @@ bool Board::isCheckmated(Color col){
     return legal.empty();
 }
 
+bool Board::isDraw() const {
+    if(halfmoveClock >= 100) return true; // 50-move rule
+    // 3-fold repetition
+    int count = 0;
+    for(uint64_t h : history){
+        if(h == hash) count++;
+    }
+    return count >= 3;
+}
+
 bool Board::isStalemate(Color col){
     if(isInCheck(col)) return false;
     std::vector<Move> legal;
@@ -462,4 +506,23 @@ int Board::pieceCount(Color col) const {
         for(int c=0;c<COLS;c++)
             if(cells[r][c].color==col && cells[r][c].type!=NONE) n++;
     return n;
+}
+
+PerftResult Board::perft(int depth) {
+    if(depth == 0) return {1, 0, 0, 0, 0};
+
+    PerftResult total;
+    std::vector<Move> moves;
+    legalMoves(currentPlayer(), moves);
+
+    for(auto& m : moves) {
+        Board saved = *this;
+        applyMove(m);
+        PerftResult res = perft(depth - 1);
+        *this = saved;
+
+        total.nodes += res.nodes;
+        // In a true perft we'd track more, but nodes is most important
+    }
+    return total;
 }

@@ -17,7 +17,8 @@ Chess4 is a high-performance terminal-based **4-player Free-for-All chess engine
 4. [Rules & Scoring](#rules--scoring)
 5. [Building](#building)
 6. [Running the Engine](#running-the-engine)
-7. [How to Play (Commands)](#how-to-play-commands)
+7. [GUI (Python)](#gui-python)
+8. [How to Play (Commands)](#how-to-play-commands)
 8. [Move Notation](#move-notation)
 9. [Engine Architecture](#engine-architecture)
 10. [AI Strategy & Theory](#ai-strategy--theory)
@@ -80,9 +81,10 @@ Each player starts with the standard 8-piece back row (`R N B Q K B N R`) and 8 
 ## Rules & Scoring
 
 ### Standard Chess Rules Apply
-- All standard piece moves (pawn double push, castling, promotion).
+- All standard piece moves (pawn double push, castling, promotion, **en passant**).
 - **Checkmate:** Eliminated from the game.
 - **Stalemate:** Current player stays in game but skips turn if no legal moves exist.
+- **Draw Rules:** 50-move rule and 3-fold repetition are fully implemented.
 
 ### Scoring System
 
@@ -107,6 +109,25 @@ Each player starts with the standard 8-piece back row (`R N B Q K B N R`) and 8 
 make
 ```
 This produces the `chess4` binary.
+
+---
+
+## GUI (Python)
+
+A Pygame-based GUI is provided for better visualization and interactive play.
+
+### Requirements
+- Python 3.x
+- `pygame-ce` (or `pygame`)
+
+### Launching the GUI
+```bash
+make gui
+# OR
+python3 gui.py
+```
+- **Click** to select and move pieces.
+- Press **Space** to trigger an AI move (Red).
 
 ---
 

@@ -16,6 +16,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Board constants
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Perft results
+struct PerftResult {
+    long nodes = 0;
+    long captures = 0;
+    long enPassant = 0;
+    long castles = 0;
+    long promotions = 0;
+};
+
 static constexpr int ROWS = 14;
 static constexpr int COLS = 14;
 static constexpr int NUM_PLAYERS = 4;
@@ -63,10 +73,13 @@ struct Move {
     PieceType promotion = NONE;  // if pawn promotes
     bool castleKingside  = false;
     bool castleQueenside = false;
+    bool isEnPassant     = false;
 
     bool valid() const { return inBounds(sr,sc) && inBounds(tr,tc); }
     bool operator==(const Move& o) const {
-        return sr==o.sr && sc==o.sc && tr==o.tr && tc==o.tc && promotion==o.promotion;
+        return sr==o.sr && sc==o.sc && tr==o.tr && tc==o.tc && promotion==o.promotion &&
+               castleKingside==o.castleKingside && castleQueenside==o.castleQueenside &&
+               isEnPassant==o.isEnPassant;
     }
 };
 
@@ -102,6 +115,9 @@ struct Board {
     int    turnOrder[4];         // active turn order (Color values)
     int    turnIdx = 0;          // index into turnOrder
     uint64_t hash = 0;
+    Sq     enPassantSq = {-1, -1};
+    int    halfmoveClock = 0;
+    std::vector<uint64_t> history;
 
     void reset();
 
@@ -127,6 +143,7 @@ struct Board {
     bool isInCheck(Color col) const;
     bool isCheckmated(Color col);
     bool isStalemate(Color col);
+    bool isDraw() const;
 
     // Generate pseudo-legal moves for a piece
     void genMovesFor(int r, int c, std::vector<Move>& out) const;
@@ -134,6 +151,9 @@ struct Board {
     void genAllMoves(Color col, std::vector<Move>& out) const;
     // Generate fully legal moves (king not left/put in check)
     void legalMoves(Color col, std::vector<Move>& out);
+
+    // Perft
+    PerftResult perft(int depth);
 
     // Pawn capture diagonals (perpendicular to forward)
     static void pawnCapDeltas(Color col, int ds[2][2]);
@@ -193,6 +213,10 @@ struct SearchResult {
     long nodes    = 0;
 };
 
+
+// Forward declaration
+struct Board;
+
 /**
  * @brief The Engine class implements the search and evaluation logic for Chess4.
  * Uses Paranoid Alpha-Beta search with Iterative Deepening.
@@ -249,7 +273,7 @@ public:
     Board board;
     Engine engine;
 
-    void start();                   // enter interactive loop
+    void start(bool proto = false);  // enter interactive loop (optional protocol mode)
     void printBoard() const;
     void printScores() const;
     std::string moveToStr(const Move& m) const;
