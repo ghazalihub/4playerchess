@@ -25,7 +25,7 @@ class ChessEngine:
         threading.Thread(target=self._read_stream, daemon=True).start()
         self.send("proto")
         self.send("ready")
-        self.sync_board()
+        # Let the turn/bestmove messages from start trigger sync_board
 
     def _read_stream(self):
         for line in iter(self.process.stdout.readline, ''):

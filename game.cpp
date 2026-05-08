@@ -288,7 +288,7 @@ static void doAiMove(Board& b, Engine& eng, bool proto){
         char tc = 'a' + res.bestMove.tc;
         std::cout << fc << (int)(res.bestMove.sr+1) << tc << (int)(res.bestMove.tr+1);
         if(res.bestMove.promotion != NONE) std::cout << (char)std::tolower(pieceChar(res.bestMove.promotion));
-        std::cout << "\n";
+        std::cout << std::endl;
     } else {
         std::cout << Ansi::pieceBg(RED) << " AI " << Ansi::RESET
                   << " plays: " << Ansi::BOLD
@@ -347,7 +347,7 @@ static bool applyHumanMove(Board& b, const Move& m, bool proto){
     }
     if(!found){
         if(!proto) std::cout << Ansi::YELLOW_FG << "Illegal move. Type 'moves' to see legal moves.\n" << Ansi::RESET;
-        else std::cout << "illegal\n";
+        else std::cout << "illegal" << std::endl;
         return false;
     }
 
@@ -429,14 +429,14 @@ void Game::start(bool proto){
                 printScores();
             } else {
                 Color winner = findWinner(board);
-                std::cout << "gameover " << colorNameLower(winner) << "\n";
+                std::cout << "gameover " << colorNameLower(winner) << std::endl;
             }
             break;
         }
 
         if(board.isDraw()){
             if(!proto) std::cout << "\n" << Ansi::BOLD << Ansi::YELLOW_FG << "⚖  DRAW!\n" << Ansi::RESET;
-            else std::cout << "draw\n";
+            else std::cout << "draw" << std::endl;
             break;
         }
 
@@ -444,7 +444,7 @@ void Game::start(bool proto){
         if(cur==NO_COLOR) break;
 
         if(proto) {
-            std::cout << "turn " << colorNameLower(cur) << "\n";
+            std::cout << "turn " << colorNameLower(cur) << std::endl;
         }
 
         if(cur==RED){
@@ -475,11 +475,11 @@ void Game::start(bool proto){
             if(!proto) std::cout << "Goodbye!\n";
             break;
         }
-        if(proto && line == "proto") { std::cout << "protook\n"; continue; }
-        if(proto && line == "ready") { std::cout << "readyok\n"; continue; }
+        if(proto && line == "proto") { std::cout << "protook" << std::endl; continue; }
+        if(proto && line == "ready") { std::cout << "readyok" << std::endl; continue; }
         if(proto && line == "go") { doAiMove(board, engine, proto); continue; }
         if(proto && line == "board") {
-            std::cout << "board\n";
+            std::cout << "board" << std::endl;
             for(int r=0; r<ROWS; r++){
                 for(int c=0; c<COLS; c++){
                     if(!inBounds(r,c)) continue;
@@ -487,11 +487,11 @@ void Game::start(bool proto){
                     if(!p.empty()){
                         std::cout << r << " " << c << " "
                                   << colorNameLower(p.color) << " "
-                                  << pieceChar(p.type) << "\n";
+                                  << pieceChar(p.type) << std::endl;
                     }
                 }
             }
-            std::cout << "boardok\n";
+            std::cout << "boardok" << std::endl;
             continue;
         }
         if(proto && line.rfind("perft ", 0) == 0) {
@@ -571,7 +571,7 @@ void Game::start(bool proto){
                 printBoard();
                 printScores();
             } else {
-                std::cout << "moveok\n";
+                std::cout << "moveok" << std::endl;
             }
         }
     }

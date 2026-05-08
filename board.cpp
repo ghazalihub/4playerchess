@@ -430,15 +430,15 @@ void Board::applyMove(const Move& mv){
         hash ^= Zobrist::enPassant[enPassantSq.c];
     }
 
-    // Record history for repetition
-    history.push_back(hash);
-
     // Advance turn index
     hash ^= Zobrist::sideToMove[turnIdx];
     int next=(turnIdx+1)%4;
     while(ps[turnOrder[next]].eliminated && next!=turnIdx) next=(next+1)%4;
     turnIdx=next;
     hash ^= Zobrist::sideToMove[turnIdx];
+
+    // Record history for repetition
+    history.push_back(hash);
 }
 
 void Board::undoMove(const Move& /*mv*/, Board& saved){
