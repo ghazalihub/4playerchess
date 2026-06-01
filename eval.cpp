@@ -48,11 +48,12 @@ static int advancement(int r, int c, Color col){
 // Pawn advancement bonus
 static int pawnAdvBonus(int r, int c, Color col){
     int adv = advancement(r,c,col);
-    if(adv<2) return -10;
-    if(adv<4) return 0;
-    if(adv<6) return 10;
-    if(adv<8) return 25;
-    return 40; // approaching promotion
+    if(adv<=1) return -10; // start rank
+    if(adv<=3) return 0;
+    if(adv<=6) return 10;
+    if(adv<=9) return 30;
+    if(adv<=11) return 60;
+    return 150; // Very close to promotion rank (13)
 }
 
 // Knight outpost: bonus for being in enemy half
@@ -224,34 +225,51 @@ int evaluate(const Board& b, Color aiColor){
     if(activeOpps==0) return INF/2; // AI wins
 
     int aiScore=0;
+    Board& bm = const_cast<Board&>(b);
 
-    // ── Own material + PST
+    // ── 1) Own material + PST + Tactical Hanging Check
+    // We value our own pieces and their positioning (PST).
+    // We also apply an immediate penalty for pieces that are under attack.
     int ownMat=0, ownPst=0;
     for(int r=0;r<ROWS;r++)
         for(int c=0;c<COLS;c++){
+            if(!::inBounds(r,c)) continue;
             auto& p=b.cells[r][c];
             if(p.color==aiColor){
-                ownMat += PieceVal::get(p.type);
+                int val = PieceVal::get(p.type);
+                ownMat += val;
                 ownPst += Board::pst(p.type, aiColor, r, c);
+
+                // Quick tactically hanging check
+                bool attacked = false;
+                for(int oc=1; oc<=4; oc++){
+                    if((Color)oc != aiColor && !b.ps[oc].eliminated){
+                        if(bm.isAttacked(r, c, (Color)oc)){ attacked = true; break; }
+                    }
+                }
+                if(attacked){
+                    if(!bm.isAttacked(r, c, aiColor)) aiScore -= val / 2; // Hanging!
+                    else aiScore -= val / 10; // Under pressure but defended
+                }
             }
         }
-    aiScore += ownMat + ownPst;
+    aiScore += (ownMat + ownPst);
 
-    // ── Game-score bonus (captures already made)
-    aiScore += b.ps[aiColor].score * 15;
+    // ── 2) Game-score bonus (permanent points from past captures)
+    aiScore += b.ps[aiColor].score * 40;
 
-    // ── King safety
-    Board& bm = const_cast<Board&>(b);
+    // ── 3) King safety
     aiScore += kingSafety(b, aiColor);
 
-    // ── Pawn structure
+    // ── 4) Pawn structure
     aiScore += pawnStructure(b, aiColor);
 
-    // ── Mobility
+    // ── 5) Mobility
     aiScore += mobilityScore(bm, aiColor);
 
-    // ── Opponent evaluation (we want opponents weak)
-    int strongestOppMat=0;
+    // ── 6) Opponent evaluation (Suppression)
+    // In FFA, we want opponents to be weak. We target them proportional to their strength.
+    int strongestOppTotal=0;
     for(int oc=1;oc<=4;oc++){
         Color opp=(Color)oc;
         if(opp==aiColor || b.ps[opp].eliminated) continue;
@@ -260,26 +278,33 @@ int evaluate(const Board& b, Color aiColor){
         int oppPst=0;
         for(int r=0;r<ROWS;r++)
             for(int c=0;c<COLS;c++){
-                if(!inBounds(r,c)) continue;
+                if(!::inBounds(r,c)) continue;
                 auto& p=b.cells[r][c];
                 if(p.color==opp) oppPst+=Board::pst(p.type,opp,r,c);
             }
-        int oppTotal = oppMat + oppPst + kingSafety(b,opp) + pawnStructure(b,opp);
 
-        // Subtract opponent's strength (we want them weak)
+        // Opponent total strength includes material, safety, and their own captured points
+        int oppTotal = oppMat + oppPst + kingSafety(b,opp) + b.ps[opp].score * 40;
+
+        // Subtract opponent's strength from our perspective (Suppression)
         aiScore -= oppTotal / 3;
 
-        // Track strongest opponent (biggest threat)
-        if(oppMat > strongestOppMat) strongestOppMat = oppMat;
+        if(oppTotal > strongestOppTotal) strongestOppTotal = oppTotal;
+
+        // King Attack bonus: reward threatening an enemy king
+        Sq oppKing = b.findKing(opp);
+        if(oppKing.r != -1 && b.isAttacked(oppKing.r, oppKing.c, aiColor)){
+            aiScore += 40;
+        }
     }
 
-    // ── Threat bonus: extra reward for threatening the strongest opponent
-    // (Target the leader — classic FFA strategy)
-    aiScore -= strongestOppMat / 5;
+    // ── 7) FFA Strategy: Target the Leader
+    // If one opponent is much stronger, they are the primary threat to our victory.
+    aiScore -= strongestOppTotal / 4;
 
-    // ── Endgame adjustment: if only one opponent left, play to win decisively
+    // ── 8) Endgame adjustment: if only one opponent left, play for the win.
     if(activeOpps==1){
-        aiScore += ownMat - strongestOppMat; // maximize material advantage
+        aiScore += ownMat - strongestOppTotal/2;
     }
 
     return aiScore;

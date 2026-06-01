@@ -55,39 +55,55 @@ void Engine::orderMoves(std::vector<Move>& moves, const Board& b, const Move& tt
 // ─────────────────────────────────────────────────────────────────────────────
 //  Quiescence search: only explore captures/promotions
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @brief Quiescence search to handle the horizon effect by searching tactical moves.
+ * Matches the Paranoid model: AI maximizes, others minimize.
+ */
 int Engine::quiesce(Board& b, int alpha, int beta){
     nodes_++;
     int stand_pat = Eval::evaluate(b, aiColor);
-    if(stand_pat >= beta) return beta;
-    if(stand_pat > alpha) alpha = stand_pat;
 
-    // Only generate captures & promotions
     Color col = b.currentPlayer();
-    if(col==NO_COLOR||b.ps[col].eliminated) return alpha;
+    bool maximizing = (col == aiColor);
+
+    if(maximizing){
+        if(stand_pat >= beta) return beta;
+        if(stand_pat > alpha) alpha = stand_pat;
+    } else {
+        if(stand_pat <= alpha) return alpha;
+        if(stand_pat < beta) beta = stand_pat;
+    }
+
+    if(col==NO_COLOR||b.ps[col].eliminated) return stand_pat;
 
     std::vector<Move> moves;
     b.genAllMoves(col, moves);
 
-    // Filter captures only
     std::vector<Move> caps;
     caps.reserve(moves.size());
     for(auto& m:moves){
-        Piece t = b.at(m.tr,m.tc);
+        Piece t = b.cells[m.tr][m.tc];
         if(!t.empty() && t.color!=col) caps.push_back(m);
         else if(m.promotion!=NONE) caps.push_back(m);
     }
     Move dummy{}; orderMoves(caps,b,dummy, 0);
 
     for(auto& m:caps){
-        if(timesUp()) return alpha;
-        Board saved = b.clone();
+        if(timesUp()) return stand_pat;
+        Board saved = b;
         b.applyMove(m);
-        int score = -quiesce(b, -beta, -alpha);
+        int score = quiesce(b, alpha, beta);
         b = saved;
-        if(score>=beta) return beta;
-        if(score>alpha) alpha=score;
+
+        if(maximizing){
+            if(score >= beta) return beta;
+            if(score > alpha) alpha = score;
+        } else {
+            if(score <= alpha) return alpha;
+            if(score < beta) beta = score;
+        }
     }
-    return alpha;
+    return maximizing ? alpha : beta;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,15 +120,18 @@ int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color /*per
     Color current = b.currentPlayer();
     if(current==NO_COLOR) return Eval::evaluate(b,aiColor);
 
-    // Skip eliminated players
-    if(b.ps[current].eliminated){
+    // Handle elimination / checkmate at turn start
+    if(b.ps[current].eliminated || b.isCheckmated(current)){
+        b.ps[current].eliminated = true;
         // Advance to next
-        Board tmp=b.clone();
-        int nextIdx=(tmp.turnIdx+1)%4;
-        while(tmp.ps[tmp.turnOrder[nextIdx]].eliminated && nextIdx!=tmp.turnIdx)
+        Board saved = b;
+        int nextIdx=(b.turnIdx+1)%4;
+        while(b.ps[b.turnOrder[nextIdx]].eliminated && nextIdx!=b.turnIdx)
             nextIdx=(nextIdx+1)%4;
-        tmp.turnIdx=nextIdx;
-        return paranoidSearch(tmp, depth, alpha, beta, (Color)tmp.turnOrder[nextIdx], ply);
+        b.turnIdx=nextIdx;
+        int score = paranoidSearch(b, depth, alpha, beta, (Color)b.turnOrder[b.turnIdx], ply);
+        b = saved;
+        return score;
     }
 
     // Leaf node
@@ -157,18 +176,8 @@ int Engine::paranoidSearch(Board& b, int depth, int alpha, int beta, Color /*per
 
     for(auto& m : moves){
         if(timesUp()) break;
-        Board saved = b.clone();
+        Board saved = b;
         b.applyMove(m);
-
-        // Check for checkmate bonus in evaluation
-        for(int oc=1;oc<=4;oc++){
-            Color opp=(Color)oc;
-            if(opp==current || b.ps[opp].eliminated) continue;
-            if(b.isCheckmated(opp)){
-                b.ps[opp].eliminated=true;
-                b.ps[current].score+=20;
-            }
-        }
 
         int score = paranoidSearch(b, depth-1, alpha, beta,
                                    (Color)b.turnOrder[b.turnIdx], ply + 1);
@@ -243,18 +252,8 @@ SearchResult Engine::search(Board& b){
 
         for(auto& m : rootMoves){
             if(timesUp()) break;
-            Board saved = b.clone();
+            Board saved = b;
             b.applyMove(m);
-
-            // Check checkmates from this move
-            for(int oc=1;oc<=4;oc++){
-                Color opp=(Color)oc;
-                if(opp==aiColor || b.ps[opp].eliminated) continue;
-                if(b.isCheckmated(opp)){
-                    b.ps[opp].eliminated=true;
-                    b.ps[aiColor].score+=20;
-                }
-            }
 
             int score = paranoidSearch(b, depth-1, -INF, INF,
                                        (Color)b.turnOrder[b.turnIdx], 1);

@@ -307,11 +307,6 @@ static void doAiMove(Board& b, Engine& eng, bool proto){
                   << " nodes=" << res.nodes << "]\n";
     }
 
-    if(!cap.empty()){
-        int pts=PieceVal::pts[(int)cap.type];
-        b.ps[RED].score+=pts;
-    }
-
     b.applyMove(res.bestMove);
 
     for(int oc=1;oc<=4;oc++){
@@ -363,10 +358,6 @@ static bool applyHumanMove(Board& b, const Move& m, bool proto){
                       << pieceChar(cap.type) << " +" << pts << "pt";
         }
         std::cout << "\n";
-    }
-    if(!cap.empty()){
-        int pts = PieceVal::pts[(int)cap.type];
-        b.ps[col].score += pts;
     }
 
     b.applyMove(chosen);
@@ -478,6 +469,11 @@ void Game::start(bool proto){
         if(proto && line == "proto") { std::cout << "protook" << std::endl; continue; }
         if(proto && line == "ready") { std::cout << "readyok" << std::endl; continue; }
         if(proto && line == "go") { doAiMove(board, engine, proto); continue; }
+        if(proto && line == "eval") {
+            int score = Eval::evaluate(board, engine.aiColor);
+            std::cout << "eval " << score << std::endl;
+            continue;
+        }
         if(proto && line == "board") {
             std::cout << "board" << std::endl;
             for(int r=0; r<ROWS; r++){

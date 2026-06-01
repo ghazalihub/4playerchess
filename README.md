@@ -70,10 +70,10 @@ The goal is not to checkmate a single opponent but to **accumulate the most poin
 
 | Player  | Color    | Starting Side | Pawn Direction | Promotion Row/Col |
 |---------|----------|---------------|----------------|-------------------|
-| **Red** | 🔴 AI    | Right (col 13) | Moves LEFT (←) | Reaches col 6     |
-| **Black** | ⚫ Human | Top (row 0)   | Moves DOWN (↓) | Reaches row 7     |
-| **Green** | 🟢 Human | Left (col 0)  | Moves RIGHT (→)| Reaches col 7     |
-| **Blue** | 🔵 Human | Bottom (row 13)| Moves UP (↑)  | Reaches row 6     |
+| **Red** | 🔴 AI    | Right (col 13) | Moves LEFT (←) | Reaches col 0     |
+| **Black** | ⚫ Human | Top (row 0)   | Moves DOWN (↓) | Reaches row 13    |
+| **Green** | 🟢 Human | Left (col 0)  | Moves RIGHT (→)| Reaches col 13    |
+| **Blue** | 🔵 Human | Bottom (row 13)| Moves UP (↑)  | Reaches row 0     |
 
 Each player starts with the standard 8-piece back row (`R N B Q K B N R`) and 8 pawns in front of it. Turn order is: **Red → Black → Green → Blue → Red → ...**
 
@@ -113,22 +113,34 @@ This produces the `chess4` binary.
 
 ---
 
-## GUI (Python)
+## GUI & Tools
 
-A Pygame-based GUI is provided for better visualization and interactive play.
+Chess4 provides multiple ways to play and test, including a local desktop GUI and a web-based interface.
 
 ### Requirements
 - Python 3.x
-- `pygame-ce` (or `pygame`)
+- `pygame-ce` (for Desktop GUI)
+- `flask`, `flask-socketio` (for Web GUI)
 
-### Launching the GUI
+### Launching the Desktop GUI (Pygame)
 ```bash
 make gui
-# OR
-python3 gui.py
 ```
 - **Click** to select and move pieces.
-- Press **Space** to trigger an AI move (Red).
+- Press **Space** to trigger the AI (Red).
+
+### Launching the Web GUI (Flask)
+```bash
+make webgui
+```
+- Open `http://localhost:5000` in your browser.
+- Provides a modern interactive point-and-click interface.
+
+### Automated Self-Play
+To verify engine stability and watch the AI play against itself:
+```bash
+make selfplay
+```
 
 ---
 
@@ -153,6 +165,7 @@ python3 gui.py
 | `moves` | List all legal moves for the current player |
 | `board` | Redisplay the board |
 | `scores` | Show current scores and player status |
+| `eval` | Show AI evaluation of current position |
 | `depth N` | Change AI search depth mid-game |
 | `time N` | Change AI time limit mid-game (milliseconds) |
 | `resign` | Current player resigns (eliminated) |

@@ -107,13 +107,15 @@ static bool isPawnStart(int r, int c, Color col){
     }
 }
 
-// Returns the promotion rank for a pawn (returns true if it should promote)
+/**
+ * @brief Returns true if a pawn of the given color should promote at the target square.
+ */
 static bool shouldPromote(int tr, int tc, Color col){
     switch(col){
-        case BLACK: return tr==7;   // reaches middle row going down
-        case BLUE:  return tr==6;   // reaches middle row going up
-        case GREEN: return tc==7;   // reaches middle col going right
-        case RED:   return tc==6;   // reaches middle col going left
+        case BLACK: return tr==13;  // reaches bottom back rank
+        case BLUE:  return tr==0;   // reaches top back rank
+        case GREEN: return tc==13;  // reaches right back rank
+        case RED:   return tc==0;   // reaches left back rank
         default:    return false;
     }
 }
@@ -403,6 +405,13 @@ void Board::applyMove(const Move& mv){
 
     Piece victim = cells[mv.tr][mv.tc];
 
+    // Automatic scoring for search and protocol
+    if(!victim.empty()){
+        ps[col].score += PieceVal::pts[(int)victim.type];
+    } else if(mv.isEnPassant){
+        ps[col].score += PieceVal::pts[(int)P];
+    }
+
     // Update halfmove clock: reset on pawn move or capture
     if(mover.type==P || !victim.empty()) halfmoveClock = 0;
     else halfmoveClock++;
@@ -413,10 +422,17 @@ void Board::applyMove(const Move& mv){
 
     // Handle En Passant capture
     if(mv.isEnPassant){
-        int dr, dc;
-        pawnDelta(col, dr, dc);
-        // The captured pawn is one step BEHIND the target square in the perspective of the mover
-        set(mv.tr - dr, mv.tc - dc, NO_PIECE);
+        // In 4-player chess, the captured pawn is NOT always at (mv.tr - dr, mv.tc - dc)
+        // because the mover might be moving orthogonally to the victim.
+        // The victim is always on the same Rank (for horizontal movers) or
+        // File (for vertical movers) as the source square.
+        if(col==BLACK || col==BLUE){
+            // Moving vertically: Victim is at (Target Row, Source Col)
+            set(mv.tr, mv.sc, NO_PIECE);
+        } else {
+            // Moving horizontally: Victim is at (Source Row, Target Col)
+            set(mv.sr, mv.tc, NO_PIECE);
+        }
     }
 
     // Set new En Passant square
